@@ -1,67 +1,105 @@
 const { AuthenticationError } = require('apollo-server-express');
-const { User, Book } = require('../models');
+const { signToken } = require('../utils/auth')
+const { User, Thought } = require('../models');
 
 const resolvers = {
-    Query: {
-        me: async (parent, args, context) => {
-            if (context.user) {
-                const userData = await User.findOne({ _id: context.user._id })
-                    .select('-__v -password')
-                    .populate('savedBooks')
+  Query: {
+    me: async (parent, args, context) => {
+      if (context.user) {
+        const userData = await User.findOne({ _id: context.user._id })
+          .select('-__v -password')
+          .populate('thoughts')
+          .populate('friends');
 
-                return userData;
-            }
+        return userData;
+      }
 
-            throw new AuthenticationError('Not logged in');
-        },
-        users: async () => {
-            return User.find().populate('savedBooks');
-        },
-        user: async (parent, { username }) => {
-            return User.findOne({ username }).populate('savedBooks');
-        },
-        /* savedBooks: async (parent, { username }) => {
-            const params = username ? { username } : {};
-            return Book.find(params).sort({ createdAt: -1 });
-        },
-        savedBook: async (parent, { bookId }) => {
-            return Book.findOne({ _id: bookId });
-        } */
+      throw new AuthenticationError('Not logged in');
     },
-    Mutation: {
+    users: async () => {
+      return User.find()
+        .select('-__v -password')
+        .populate('thoughts')
+        .populate('friends');
+    },
+    user: async (parent, { username }) => {
+      return User.findOne({ username })
+        .select('-__v -password')
+        .populate('friends')
+        .populate('thoughts');
+    },
+    thoughts: async (parent, { username }) => {
+      const params = username ? { username } : {};
+      return Thought.find(params).sort({ createdAt: -1 });
+    },
+    thought: async (parent, { _id }) => {
+      return Thought.findOne({ _id });
+    },
+  },
+  Mutation: {
+    addUser: async (parent, args) => {
+      const user = await User.create(args);
+      const token = signToken(user);
 
-        addUser: async (parent, { username, email, password }) => {
-            // First we create the user
-            const user = await User.create({ username, email, password });
-            // To reduce friction for the user, we immediately sign a JSON Web Token and log the user in after they are created
-            const token = signToken(user);
-            // Return an `Auth` object that consists of the signed token and user's information
-            return { token, user };
-        },
-        login: async (parent, { email, password }) => {
-            // Look up the user by the provided email address. Since the `email` field is unique, we know that only one person will exist with that email
-            const user = await User.findOne({ email });
+      return { token, user };
+    },
+    addThought: async (parent, args, context) => {
+      if (context.user) {
+        const thought = await Thought.create({ ...args, username: context.user.username });
 
-            // If there is no user with that email address, return an Authentication error stating so
-            if (!user) {
-                throw new AuthenticationError('No user found with this email address');
-            }
+        await User.findByIdAndUpdate(
+          { _id: context.user._id },
+          { $push: { thoughts: thought._id } },
+          { new: true }
+        );
 
-            // If there is a user found, execute the `isCorrectPassword` instance method and check if the correct password was provided
-            const correctPw = await user.isCorrectPassword(password);
+        return thought;
+      }
 
-            // If the password is incorrect, return an Authentication error stating so
-            if (!correctPw) {
-                throw new AuthenticationError('Incorrect credentials');
-            }
+      throw new AuthenticationError('You need to be logged in!');
+    },
+    addReaction: async (parent, { thoughtId, reactionBody }, context) => {
+      if (context.user) {
+        const updatedThought = await Thought.findOneAndUpdate(
+          { _id: thoughtId },
+          { $push: { reactions: { reactionBody, username: context.user.username } } },
+          { new: true, runValidators: true }
+        );
 
-            // If email and password are correct, sign user into the application with a JWT
-            const token = signToken(user);
+        return updatedThought;
+      }
 
-            // Return an `Auth` object that consists of the signed token and user's information
-            return { token, user };
-        },
+      throw new AuthenticationError('You need to be logged in!');
+    },
+    addFriend: async (parent, { friendId }, context) => {
+      if (context.user) {
+        const updatedUser = await User.findOneAndUpdate(
+          { _id: context.user._id },
+          // the $addToSet adds the friendId to the array of friends without "pushing" duplicates. A simple push could create this issue, hence why addToSet was used
+          { $addToSet: { friends: friendId } },
+          { new: true }
+        ).populate('friends')
+        return updatedUser;
+      }
+      throw new AuthenticationError('You need to be logged in!')
+    },
+    login: async (parent, { email, password }) => {
+      const user = await User.findOne({ email });
+
+      if (!user) {
+        throw new AuthenticationError('Incorrect credentials');
+      }
+
+      const correctPw = await user.isCorrectPassword(password);
+
+      if (!correctPw) {
+        throw new AuthenticationError('Incorrect credentials');
+      }
+
+      const token = signToken(user);
+      return { token, user };
     }
-}
+  }
+};
 
 module.exports = resolvers;
