@@ -1,32 +1,32 @@
 const { AuthenticationError } = require('apollo-server-express');
 const { User, Book } = require('../models');
 
-const books = [
-    {
-        title: 'The Awakening',
-        author: 'Kate Chopin',
-    },
-    {
-        title: 'City of Glass',
-        author: 'Paul Auster',
-    },
-];
-
 const resolvers = {
     Query: {
+        me: async (parent, args, context) => {
+            if (context.user) {
+                const userData = await User.findOne({ _id: context.user._id })
+                    .select('-__v -password')
+                    .populate('savedBooks')
+
+                return userData;
+            }
+
+            throw new AuthenticationError('Not logged in');
+        },
         users: async () => {
             return User.find().populate('savedBooks');
         },
         user: async (parent, { username }) => {
             return User.findOne({ username }).populate('savedBooks');
         },
-        savedBooks: async (parent, { username }) => {
+        /* savedBooks: async (parent, { username }) => {
             const params = username ? { username } : {};
             return Book.find(params).sort({ createdAt: -1 });
         },
         savedBook: async (parent, { bookId }) => {
             return Book.findOne({ _id: bookId });
-        }
+        } */
     },
     Mutation: {
 
