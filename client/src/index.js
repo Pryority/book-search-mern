@@ -11,22 +11,6 @@ const client = new ApolloClient({
   cache: new InMemoryCache(),
 });
 
-client
-  .query({
-    query: gql`
-      query GetLocations {
-        locations {
-          id
-          name
-          description
-          photo
-        }
-      }
-    `,
-  })
-  .then((result) => console.log(result));
-
-
 ReactDOM.render(
   <ApolloProvider client={client}>
     <React.StrictMode>
